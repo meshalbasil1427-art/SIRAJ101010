@@ -185,6 +185,131 @@
     }
 
     // ═══════════════════════════════════
+    // SKILL AUTOCOMPLETE
+    // ═══════════════════════════════════
+    function buildSkillSearchIndex(){
+      // Build flat list: [{label, key, aliases}]
+      const index=[];
+      for(const [key,meta] of Object.entries(SKILLS)){
+        const aliases=SKILL_ALIASES[key]||[];
+        const allTerms=[meta.ar.toLowerCase(),meta.en.toLowerCase(),...aliases.map(a=>a.toLowerCase())];
+        index.push({key,label:meta.ar,labelEn:meta.en,terms:allTerms});
+      }
+      return index;
+    }
+    const SKILL_INDEX=buildSkillSearchIndex();
+    let sugActiveIdx=-1;
+
+    function searchSkills(query){
+      const q=query.trim().toLowerCase();
+      if(q.length<1) return [];
+      const results=[];
+      const seen=new Set();
+      for(const item of SKILL_INDEX){
+        // Already added?
+        if(state.profile.skills.some(s=>s.key===item.key)) continue;
+        // Match: starts with, includes
+        let score=0;
+        for(const t of item.terms){
+          if(t===q){score=100;break;}
+          if(t.startsWith(q)){score=Math.max(score,80);}
+          else if(q.length>=2&&t.includes(q)){score=Math.max(score,50);}
+          // Also match query against start of each word
+          const words=t.split(/\s+/);
+          for(const w of words){if(w.startsWith(q)) score=Math.max(score,70);}
+        }
+        if(score>0&&!seen.has(item.key)){
+          seen.add(item.key);
+          results.push({...item,score});
+        }
+      }
+      return results.sort((a,b)=>b.score-a.score).slice(0,8);
+    }
+
+    function renderSuggestions(results){
+      const box=$("skillSuggestions");
+      if(!results.length){box.classList.remove("open");box.innerHTML="";sugActiveIdx=-1;return;}
+      box.innerHTML=results.map((r,i)=>
+        `<div class="sug-item${i===sugActiveIdx?' active':''}" data-key="${r.key}" data-label="${escHtml(r.label)}">
+          <span>${escHtml(r.label)} <span style="color:var(--muted);font-size:11px">${escHtml(r.labelEn)}</span></span>
+        </div>`
+      ).join("");
+      box.classList.add("open");
+      // Click handlers
+      box.querySelectorAll(".sug-item").forEach(el=>{
+        el.addEventListener("mousedown",e=>{
+          e.preventDefault(); // prevent blur
+          selectSuggestion(el.dataset.label);
+        });
+      });
+    }
+
+    function selectSuggestion(label){
+      const input=$("skillName");
+      input.value=label;
+      $("skillSuggestions").classList.remove("open");
+      $("skillSuggestions").innerHTML="";
+      sugActiveIdx=-1;
+      // Auto-add
+      addSkill(label,$("skillLevel").value);
+      input.value="";
+      input.focus();
+    }
+
+    function initAutocomplete(){
+      const input=$("skillName");
+      const box=$("skillSuggestions");
+
+      input.addEventListener("input",()=>{
+        const results=searchSkills(input.value);
+        sugActiveIdx=-1;
+        renderSuggestions(results);
+      });
+
+      input.addEventListener("keydown",e=>{
+        const items=box.querySelectorAll(".sug-item");
+        if(!items.length||!box.classList.contains("open")){
+          // Enter without suggestions = normal add
+          if(e.key==="Enter"){e.preventDefault();$("addSkillBtn").click();}
+          return;
+        }
+        if(e.key==="ArrowDown"){
+          e.preventDefault();
+          sugActiveIdx=Math.min(sugActiveIdx+1,items.length-1);
+          items.forEach((el,i)=>el.classList.toggle("active",i===sugActiveIdx));
+          items[sugActiveIdx]?.scrollIntoView({block:"nearest"});
+        }else if(e.key==="ArrowUp"){
+          e.preventDefault();
+          sugActiveIdx=Math.max(sugActiveIdx-1,0);
+          items.forEach((el,i)=>el.classList.toggle("active",i===sugActiveIdx));
+          items[sugActiveIdx]?.scrollIntoView({block:"nearest"});
+        }else if(e.key==="Enter"){
+          e.preventDefault();
+          if(sugActiveIdx>=0&&items[sugActiveIdx]){
+            selectSuggestion(items[sugActiveIdx].dataset.label);
+          }else{
+            // Select first suggestion
+            if(items[0]) selectSuggestion(items[0].dataset.label);
+            else $("addSkillBtn").click();
+          }
+        }else if(e.key==="Escape"){
+          box.classList.remove("open");box.innerHTML="";sugActiveIdx=-1;
+        }
+      });
+
+      input.addEventListener("blur",()=>{
+        setTimeout(()=>{box.classList.remove("open");box.innerHTML="";sugActiveIdx=-1;},150);
+      });
+
+      input.addEventListener("focus",()=>{
+        if(input.value.trim().length>=1){
+          const results=searchSkills(input.value);
+          renderSuggestions(results);
+        }
+      });
+    }
+
+    // ═══════════════════════════════════
     // SKILLS MANAGEMENT
     // ═══════════════════════════════════
     function addSkill(raw,level){
@@ -952,9 +1077,10 @@
       Y+=110;
 
       // Footer
-      need(30);
-      ln(mg,H-50,rE,H-50,"#CBD5E1",1);
-      txtC("تم التوليد آلياً عبر محرك سِراج — مصادر البيانات: Glassdoor, ERI SalaryExpert, PayScale, GulfTalent 2025-2026",W/2,H-38,11,"#94A3B8","400");
+      need(50);
+      ln(mg,H-60,rE,H-60,"#CBD5E1",1);
+      txtC("تنويه: الأرقام والرواتب تقديرية مبنية على مصادر عامة وقد تختلف حسب الشركة والمدينة والخبرة",W/2,H-52,10,"#94A3B8","400");
+      txtC("المصادر: Glassdoor, ERI SalaryExpert, PayScale, GulfTalent (2025-2026) — تم التوليد آلياً عبر محرك سِراج",W/2,H-36,10,"#94A3B8","400");
 
       // ═══ EXPORT ═══
       try{
@@ -990,7 +1116,7 @@
       });
 
       $("addSkillBtn").addEventListener("click",()=>{addSkill(dom.skillName.value,dom.skillLevel.value);dom.skillName.value="";dom.skillName.focus();});
-      dom.skillName.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("addSkillBtn").click();}});
+      // Enter key handled by initAutocomplete()
 
       $("loadSampleBtn").addEventListener("click",()=>{
         dom.major.value="نظم المعلومات";dom.experienceYears.value="1";dom.sector.value="quasi";
@@ -1070,6 +1196,14 @@
       $("evidenceCancelBtn").addEventListener("click",closeEvidenceModal);
       $("evidenceModal").addEventListener("click",e=>{if(e.target===$("evidenceModal")) closeEvidenceModal();});
 
+      // Sources modal
+      const openSrc=()=>$("sourcesModal").classList.add("open");
+      const closeSrc=()=>$("sourcesModal").classList.remove("open");
+      $("openSourcesBtn").addEventListener("click",openSrc);
+      $("openSourcesBtn2").addEventListener("click",openSrc);
+      $("closeSourcesBtn").addEventListener("click",closeSrc);
+      $("sourcesModal").addEventListener("click",e=>{if(e.target===$("sourcesModal")) closeSrc();});
+
       $("chatSendBtn").addEventListener("click",()=>{handleChat(dom.chatInput.value);dom.chatInput.value="";dom.chatInput.focus();});
       dom.chatInput.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("chatSendBtn").click();}});
       document.querySelectorAll(".quick-btn").forEach(b=>b.addEventListener("click",()=>handleChat(b.dataset.q)));
@@ -1078,6 +1212,6 @@
     // ═══════════════════════════════════
     // INIT
     // ═══════════════════════════════════
-    function init(){cacheDom();bindEvents();loadProfile();renderRoles();setTab("profile");}
+    function init(){cacheDom();bindEvents();loadProfile();renderRoles();setTab("profile");initAutocomplete();}
     init();
   })();

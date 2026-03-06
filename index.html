@@ -87,6 +87,14 @@
     .skills-panel{border:1px solid var(--line);border-radius:14px;padding:16px;background:var(--bg2);margin-top:16px}
     .skill-add{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
     .skill-add .input{flex:1;min-width:180px}.skill-add .select{width:160px}
+    .skill-input-wrap{position:relative;flex:1;min-width:180px}
+    .skill-input-wrap .input{width:100%}
+    .suggestions{position:absolute;top:100%;right:0;left:0;z-index:50;background:var(--card);border:1px solid var(--line);border-top:none;border-radius:0 0 10px 10px;max-height:200px;overflow-y:auto;display:none;box-shadow:0 8px 24px rgba(0,0,0,0.3)}
+    .suggestions.open{display:block}
+    .sug-item{padding:9px 14px;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);transition:background .1s}
+    .sug-item:last-child{border:none}
+    .sug-item:hover,.sug-item.active{background:var(--primaryDim);color:var(--primary)}
+    .sug-item .sug-cat{font-size:10px;color:var(--muted);background:var(--card2);padding:2px 6px;border-radius:4px}
     .skill-table{width:100%;border-collapse:collapse;border-radius:12px;overflow:hidden;border:1px solid var(--line)}
     .skill-table th,.skill-table td{padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;text-align:start}
     .skill-table th{background:var(--card2);font-size:11px;font-weight:800;color:var(--text2);letter-spacing:.02em}
@@ -313,7 +321,10 @@
               <div class="skills-panel">
                 <div class="section-head" style="margin-bottom:10px"><h2>مهاراتك (مستوى 1–5)</h2><span class="small">أضف مهارة ثم حدّد المستوى</span></div>
                 <div class="skill-add">
-                  <input class="input" id="skillName" placeholder="مثال: SQL, Python, تحليل المتطلبات" autocomplete="off"/>
+                  <div class="skill-input-wrap">
+                    <input class="input" id="skillName" placeholder="مثال: SQL, Python, تحليل المتطلبات" autocomplete="off"/>
+                    <div class="suggestions" id="skillSuggestions"></div>
+                  </div>
                   <select class="select" id="skillLevel"><option value="1">1 مبتدئ</option><option value="2">2</option><option value="3" selected>3 متوسط</option><option value="4">4 متقدم</option><option value="5">5 خبير</option></select>
                   <button class="btn btn-primary" id="addSkillBtn">+ إضافة</button>
                   <button class="btn btn-warn" id="loadSampleBtn">عرض ديمو</button>
@@ -380,17 +391,24 @@
               <div class="panel"><h4>المهارات الناقصة/الضعيفة (مرتبة بالأثر)</h4><ol class="list" id="missingList"></ol></div>
               <div class="panel"><h4>خارطة طريق مخصصة</h4><div id="roadmap"></div></div>
               <div class="panel"><h4>مشاريع بورتفوليو مقترحة</h4><div id="projects"></div></div>
+              <div style="margin-top:12px;padding:12px 16px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:12px;font-size:11px;color:var(--muted);line-height:1.8">
+                <span style="color:var(--warn);font-weight:800">تنويه:</span> الأرقام والرواتب تقديرية مبنية على مصادر عامة (Glassdoor, ERI SalaryExpert, PayScale, GulfTalent 2025-2026) وقد تختلف حسب الشركة والمدينة والخبرة الفعلية. يُنصح بالتحقق من المصادر الرسمية قبل اتخاذ قرارات مهنية.
+                <button class="btn btn-ghost btn-xs" id="openSourcesBtn" style="margin-top:6px">مصادر البيانات</button>
+              </div>
               <div class="actions"><button class="btn btn-primary" id="saveReportBtn">حفظ التقرير</button></div>
             </section>
 
             <!-- REPORT -->
             <section id="viewReport" style="display:none">
               <div class="section-head"><h2>التقرير</h2><span class="badge">Report</span></div>
-              <div class="hint">يمكنك تصدير التقرير كـ PDF أو JSON أو مشاركته عبر رابط.</div>
+              <div class="hint">يمكنك تصدير التقرير كملف (PDF إذا مدعوم، أو صورة PNG) أو JSON أو مشاركته عبر رابط.</div>
               <div class="report-summary" id="reportSummary"></div>
               <div class="panel"><h4>البيانات (JSON)</h4><div class="mono" id="reportJson"></div></div>
+              <div style="margin-bottom:12px;padding:10px 14px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:10px;font-size:11px;color:var(--muted);line-height:1.7">
+                <span style="color:var(--warn);font-weight:800">تنويه:</span> البيانات والرواتب تقديرية من مصادر عامة. <button class="btn btn-ghost btn-xs" id="openSourcesBtn2" style="margin-inline-start:4px">مصادر البيانات</button>
+              </div>
               <div class="actions">
-                <button class="btn btn-primary" id="downloadPdfBtn">تصدير PDF</button>
+                <button class="btn btn-primary" id="downloadPdfBtn">تصدير التقرير</button>
                 <button class="btn btn-ghost" id="downloadJsonBtn">تصدير JSON</button>
                 <button class="btn btn-soft" id="copyLinkBtn">نسخ رابط المشاركة</button>
               </div>
@@ -418,6 +436,39 @@
       </div>
     </div>
   </main>
+
+  <!-- Sources Modal -->
+  <div class="modal-overlay" id="sourcesModal">
+    <div class="modal-box" style="max-width:520px">
+      <h3>مصادر البيانات</h3>
+      <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px">البيانات المستخدمة في سِراج تقديرية ومبنية على المصادر العامة التالية. يُنصح بالتحقق من الأرقام الفعلية قبل اتخاذ قرارات مهنية.</div>
+      <div id="sourcesList" style="display:flex;flex-direction:column;gap:8px">
+        <a href="https://www.glassdoor.com/Salaries/riyadh-saudi-arabia-salary-SRCH_IL.0,19_IM1652.htm" target="_blank" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;transition:border-color .15s">
+          <div style="font-weight:800;font-size:13px">Glassdoor Saudi Arabia</div>
+          <div style="font-size:11px;color:var(--muted);margin-inline-start:auto">رواتب فعلية — 2025-2026</div>
+        </a>
+        <a href="https://www.salaryexpert.com/salary/country/saudi-arabia" target="_blank" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;transition:border-color .15s">
+          <div style="font-weight:800;font-size:13px">ERI SalaryExpert</div>
+          <div style="font-size:11px;color:var(--muted);margin-inline-start:auto">مسوحات رواتب — 2026</div>
+        </a>
+        <a href="https://www.payscale.com/research/SA/Country=Saudi_Arabia/Salary" target="_blank" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;transition:border-color .15s">
+          <div style="font-weight:800;font-size:13px">PayScale Saudi Arabia</div>
+          <div style="font-size:11px;color:var(--muted);margin-inline-start:auto">أمن سيبراني وتقنية — 2025</div>
+        </a>
+        <a href="https://www.gulftalent.com/resources/market-research-reports" target="_blank" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;transition:border-color .15s">
+          <div style="font-weight:800;font-size:13px">GulfTalent IT Salary Guide</div>
+          <div style="font-size:11px;color:var(--muted);margin-inline-start:auto">دليل رواتب التقنية الخليجي — 2025</div>
+        </a>
+        <a href="https://www.vision2030.gov.sa/ar/" target="_blank" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;transition:border-color .15s">
+          <div style="font-weight:800;font-size:13px">رؤية السعودية 2030</div>
+          <div style="font-size:11px;color:var(--muted);margin-inline-start:auto">البرامج والمبادرات الوطنية</div>
+        </a>
+      </div>
+      <div class="modal-actions" style="margin-top:14px">
+        <button class="btn btn-primary" id="closeSourcesBtn">إغلاق</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Evidence Modal -->
   <div class="modal-overlay" id="evidenceModal">

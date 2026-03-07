@@ -19,6 +19,25 @@
     const nowISO = () => new Date().toISOString();
     const uid = () => "r_"+Math.random().toString(16).slice(2)+"_"+Date.now().toString(16);
     const escHtml = s => { const d=document.createElement("div"); d.textContent=String(s); return d.innerHTML; };
+    // تنظيف رد AI من Markdown وتحويله لنص نظيف
+    function cleanAIText(raw){
+      let s=String(raw||"");
+      // Remove ## headers
+      s=s.replace(/^#{1,4}\s*/gm,"");
+      // Convert **bold** to <b>
+      s=s.replace(/\*\*(.+?)\*\*/g,"<b>$1</b>");
+      // Convert *italic* to <em>
+      s=s.replace(/\*(.+?)\*/g,"<em>$1</em>");
+      // Convert - bullets to line breaks
+      s=s.replace(/^\s*[-•]\s+/gm,"▸ ");
+      // Convert numbered lists
+      s=s.replace(/^\s*\d+[.)]\s+/gm,"▸ ");
+      // Convert newlines to <br>
+      s=s.replace(/\n/g,"<br>");
+      // Clean up multiple <br>
+      s=s.replace(/(<br>){3,}/g,"<br><br>");
+      return s;
+    }
 
     const store = {
       get(k,fb){ try{ const v=localStorage.getItem(k); return v!==null?JSON.parse(v):fb; }catch{return fb;} },
@@ -781,16 +800,16 @@
       if(res.aiReview){
         aiBox.innerHTML=
           `<h4>مراجعة الجاهزية بالذكاء الاصطناعي</h4>`+
-          `<p style="margin-bottom:10px"><b>التقييم المهني:</b> ${escHtml(res.aiReview.fitAssessment||"—")}</p>`+
-          `<p style="margin-bottom:10px"><b>أهم خطوة الآن:</b> ${escHtml(res.aiReview.priorityAction||"—")}</p>`+
-          (res.aiReview.topStrengths?.length?`<p style="margin-bottom:10px"><b>نقاط القوة:</b> ${escHtml(res.aiReview.topStrengths.join("، "))}</p>`:"")+
-          (res.aiReview.topGaps?.length?`<p style="margin-bottom:10px"><b>أهم الفجوات:</b> ${escHtml(res.aiReview.topGaps.join("، "))}</p>`:"")+
-          (res.aiReview.marketInsight?`<p><b>رؤية سوقية:</b> ${escHtml(res.aiReview.marketInsight)}</p>`:"");
+          `<p style="margin-bottom:10px"><b>التقييم المهني:</b> ${cleanAIText(res.aiReview.fitAssessment||"—")}</p>`+
+          `<p style="margin-bottom:10px"><b>أهم خطوة الآن:</b> ${cleanAIText(res.aiReview.priorityAction||"—")}</p>`+
+          (res.aiReview.topStrengths?.length?`<p style="margin-bottom:10px"><b>نقاط القوة:</b> ${cleanAIText(res.aiReview.topStrengths.join("، "))}</p>`:"")+
+          (res.aiReview.topGaps?.length?`<p style="margin-bottom:10px"><b>أهم الفجوات:</b> ${cleanAIText(res.aiReview.topGaps.join("، "))}</p>`:"")+
+          (res.aiReview.marketInsight?`<p><b>رؤية سوقية:</b> ${cleanAIText(res.aiReview.marketInsight)}</p>`:"");
       }else{
         aiBox.innerHTML=`<h4>مراجعة الجاهزية بالذكاء الاصطناعي</h4><p style="color:var(--muted)">جاري التحليل بالذكاء الاصطناعي...</p>`;
         getAISummary(state.profile,role,res).then(summary=>{
           if(summary){
-            aiBox.innerHTML=`<h4>مراجعة الجاهزية بالذكاء الاصطناعي</h4><p>${escHtml(summary)}</p>`;
+            aiBox.innerHTML=`<h4>مراجعة الجاهزية بالذكاء الاصطناعي</h4><p>${cleanAIText(summary)}</p>`;
           }else{
             const lvl=res.score>=75?"ممتاز":res.score>=50?"جيد":res.score>=30?"متوسط":"مبتدئ";
             const tip=res.missing.length>0?`ركّز على ${res.missing[0].label} كأولوية أولى.`:"ملفك قوي، ركّز على البورتفوليو.";
@@ -858,8 +877,10 @@
       const b=document.createElement("div");b.className="bubble";w.appendChild(b);
       dom.dialog.appendChild(w);dom.dialog.scrollTop=dom.dialog.scrollHeight;
       if(sender==="user"){b.textContent=text;return;}
+      // Strip markdown for chat display
+      let clean=String(text||"").replace(/^#{1,4}\s*/gm,"").replace(/\*\*(.+?)\*\*/g,"$1").replace(/\*(.+?)\*/g,"$1").replace(/^\s*[-•]\s+/gm,"• ");
       let i=0;b.textContent="";
-      function type(){if(i<text.length){b.textContent+=text.charAt(i);i++;dom.dialog.scrollTop=dom.dialog.scrollHeight;setTimeout(type,15);}}
+      function type(){if(i<clean.length){b.textContent+=clean.charAt(i);i++;dom.dialog.scrollTop=dom.dialog.scrollHeight;setTimeout(type,15);}}
       type();
     }
 
@@ -1241,21 +1262,30 @@
       $("compareBtn").addEventListener("click",()=>{dom.comparePanel.style.display=dom.comparePanel.style.display==="none"?"block":"none";});
       $("runCompareBtn").addEventListener("click",runComparison);
 
-      $("analyzeBtn").addEventListener("click",()=>{
+      $("analyzeBtn").addEventListener("click",async()=>{
         if(!validateProfile()){toast("أكمل الملف أولاً");setTab("profile");return;}
         if(!state.selectedRoleId){toast("اختر الوظيفة أولاً");return;}
         const role=ROLES.find(r=>r.id===state.selectedRoleId);if(!role) return;
         const btn=$("analyzeBtn");const orig=btn.innerHTML;
-        btn.innerHTML="جاري التحليل بالذكاء الاصطناعي...";btn.disabled=true;btn.classList.add("tech-bulb-loading");
+        btn.innerHTML="جاري التحليل الذكي...";btn.disabled=true;btn.classList.add("tech-bulb-loading");
 
-        setTimeout(()=>{
-          try{
-            const res=analyzeFallback(state.profile,role);
-            state.analysis={role,res};renderAnalysis(res,role);setTab("analysis");
-            saySiraj("siraj",`اكتمل التحليل! نسبة جاهزيتك لـ "${role.ar}" هي ${res.score}/100.`);
-          }catch(e){toast("خطأ بالتحليل");console.error(e);}
-          finally{btn.innerHTML=orig;btn.disabled=false;btn.classList.remove("tech-bulb-loading");}
-        },1500);
+        try{
+          const baseRes=analyzeFallback(state.profile,role);
+
+          let finalRes=baseRes;
+          const aiReview=await getAIEnhancedAnalysis(state.profile,role,baseRes);
+
+          if(aiReview){
+            finalRes=mergeAIReviewIntoResult(baseRes,aiReview);
+          }
+
+          state.analysis={role,res:finalRes};
+          renderAnalysis(finalRes,role);
+          setTab("analysis");
+
+          saySiraj("siraj",`اكتمل التحليل! نسبة جاهزيتك لوظيفة "${role.ar}" هي ${finalRes.score}/100.`);
+        }catch(e){toast("خطأ بالتحليل");console.error(e);}
+        finally{btn.innerHTML=orig;btn.disabled=false;btn.classList.remove("tech-bulb-loading");}
       });
 
       $("saveReportBtn").addEventListener("click",()=>{

@@ -587,6 +587,95 @@
       }catch(e){console.warn("AI Chat unavailable");return null;}
     }
 
+    async function getAIEnhancedAnalysis(profile, role, result) {
+      try {
+        const payload = {
+          major: profile.major,
+          eduLevel: profile.eduLevel,
+          experienceYears: profile.experienceYears,
+          sector: profile.sector,
+          certs: profile.certs || [],
+          tools: profile.tools || [],
+          skills: (profile.skills || []).map(s => ({
+            raw: s.raw,
+            normalized: skillLabel(s.key),
+            key: s.key,
+            level: s.level
+          })),
+          targetRole: {
+            id: role.id,
+            name: role.ar,
+            description: role.descAr
+          },
+          preliminaryResult: {
+            score: result.score,
+            estWeeks: result.estWeeks,
+            confidence: result.confidence,
+            breakdown: result.breakdown,
+            missing: (result.missing || []).slice(0, 8).map(m => ({
+              skill: m.skill,
+              label: m.label,
+              reqLevel: m.reqLevel,
+              userLevel: m.userLevel,
+              impact: m.impact
+            })),
+            charts: (result.charts || []).map(c => ({
+              skill: c.label,
+              required: c.req,
+              user: c.user
+            }))
+          }
+        };
+
+        const resp = await fetch(AI_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "analysis_review",
+            context: payload
+          })
+        });
+
+        if (!resp.ok) return null;
+
+        const data = await resp.json();
+        return data.review || null;
+      } catch (e) {
+        console.warn("AI Enhanced Analysis unavailable", e);
+        return null;
+      }
+    }
+
+    function mergeAIReviewIntoResult(baseResult, aiReview) {
+      if (!aiReview) return baseResult;
+
+      const merged = JSON.parse(JSON.stringify(baseResult));
+
+      const originalScore = Number(baseResult.score || 0);
+      let adjustedScore = Number(aiReview.adjustedScore);
+
+      if (Number.isFinite(adjustedScore)) {
+        const delta = adjustedScore - originalScore;
+        const safeDelta = clamp(delta, -8, 8);
+        merged.score = clamp(originalScore + safeDelta, 0, 100);
+      }
+
+      merged.aiReview = {
+        topStrengths: Array.isArray(aiReview.topStrengths) ? aiReview.topStrengths.slice(0, 3) : [],
+        topGaps: Array.isArray(aiReview.topGaps) ? aiReview.topGaps.slice(0, 3) : [],
+        fitAssessment: aiReview.fitAssessment || "",
+        priorityAction: aiReview.priorityAction || "",
+        confidenceNote: aiReview.confidenceNote || "",
+        marketInsight: aiReview.marketInsight || ""
+      };
+
+      if (merged.confidence && merged.aiReview.confidenceNote) {
+        merged.confidence.note = merged.aiReview.confidenceNote;
+      }
+
+      return merged;
+    }
+
     // ═══════════════════════════════════
     // RENDER ANALYSIS
     // ═══════════════════════════════════
@@ -644,7 +733,7 @@
             `</div>`;
           }).join("")+
         `</div>`+
-        `<div style="margin-top:8px;padding:6px;background:rgba(59,130,246,0.05);border-radius:8px;font-size:11px;color:var(--text2);line-height:1.6">${escHtml(lens.tip)}</div>`;
+        `<div style="margin-top:8px;padding:6px;background:rgba(217,119,6,0.05);border-radius:8px;font-size:11px;color:var(--text2);line-height:1.6">${escHtml(lens.tip)}</div>`;
 
       // Vision 2030
       $("visionBadgeBox").innerHTML=mkt.vision?
@@ -685,20 +774,30 @@
       try{drawBarChart(dom.barChart,res.charts);drawRadarChart(dom.radarChart,res.charts);}catch(e){console.error(e);}
       state.completedSteps.add("analysis");
 
-      // AI Summary (async)
+      // AI Summary / Review
       const aiBox=$("aiSummaryBox");
       aiBox.style.display="block";
-      aiBox.innerHTML=`<h4>ملخص سِراج الذكي</h4><p style="color:var(--muted)">جاري التحليل بالذكاء الاصطناعي...</p>`;
-      getAISummary(state.profile,role,res).then(summary=>{
-        if(summary){
-          aiBox.innerHTML=`<h4>ملخص سِراج الذكي (AI)</h4><p>${escHtml(summary)}</p>`;
-        }else{
-          // Fallback summary
-          const lvl=res.score>=75?"ممتاز":res.score>=50?"جيد":res.score>=30?"متوسط":"مبتدئ";
-          const tip=res.missing.length>0?`ركّز على ${res.missing[0].label} كأولوية أولى.`:"ملفك قوي، ركّز على البورتفوليو.";
-          aiBox.innerHTML=`<h4>ملخص سِراج الذكي</h4><p>مستوى جاهزيتك لوظيفة ${escHtml(role.ar)} هو <b>${lvl}</b> بنسبة ${res.score}%. ${tip} ${res.estWeeks>0?`تحتاج تقريباً ${res.estWeeks} أسبوع للوصول لجاهزية مناسبة.`:""} القطاع ${state.profile.sector==="gov"?"الحكومي":state.profile.sector==="private"?"الخاص":"الشبه حكومي"} يركز أكثر على ${state.profile.sector==="gov"?"المهارات الإدارية والتواصل":"المهارات التقنية التخصصية"}.</p>`;
-        }
-      });
+
+      if(res.aiReview){
+        aiBox.innerHTML=
+          `<h4>مراجعة الجاهزية بالذكاء الاصطناعي</h4>`+
+          `<p style="margin-bottom:10px"><b>التقييم المهني:</b> ${escHtml(res.aiReview.fitAssessment||"—")}</p>`+
+          `<p style="margin-bottom:10px"><b>أهم خطوة الآن:</b> ${escHtml(res.aiReview.priorityAction||"—")}</p>`+
+          (res.aiReview.topStrengths?.length?`<p style="margin-bottom:10px"><b>نقاط القوة:</b> ${escHtml(res.aiReview.topStrengths.join("، "))}</p>`:"")+
+          (res.aiReview.topGaps?.length?`<p style="margin-bottom:10px"><b>أهم الفجوات:</b> ${escHtml(res.aiReview.topGaps.join("، "))}</p>`:"")+
+          (res.aiReview.marketInsight?`<p><b>رؤية سوقية:</b> ${escHtml(res.aiReview.marketInsight)}</p>`:"");
+      }else{
+        aiBox.innerHTML=`<h4>مراجعة الجاهزية بالذكاء الاصطناعي</h4><p style="color:var(--muted)">جاري التحليل بالذكاء الاصطناعي...</p>`;
+        getAISummary(state.profile,role,res).then(summary=>{
+          if(summary){
+            aiBox.innerHTML=`<h4>مراجعة الجاهزية بالذكاء الاصطناعي</h4><p>${escHtml(summary)}</p>`;
+          }else{
+            const lvl=res.score>=75?"ممتاز":res.score>=50?"جيد":res.score>=30?"متوسط":"مبتدئ";
+            const tip=res.missing.length>0?`ركّز على ${res.missing[0].label} كأولوية أولى.`:"ملفك قوي، ركّز على البورتفوليو.";
+            aiBox.innerHTML=`<h4>مراجعة الجاهزية بالذكاء الاصطناعي</h4><p>مستوى جاهزيتك لوظيفة ${escHtml(role.ar)} هو <b>${lvl}</b> بنسبة ${res.score}%. ${tip} ${res.estWeeks>0?`تحتاج تقريباً ${res.estWeeks} أسبوع.`:""}</p>`;
+          }
+        });
+      }
     }
 
     // ═══════════════════════════════════
@@ -714,11 +813,11 @@
       for(let i=1;i<=5;i++){const y=pad.t+cH-cH*(i/5);ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(W-pad.r,y);ctx.stroke();ctx.fillStyle="#6b7c73";ctx.font="11px system-ui";ctx.fillText(String(i),pad.l-20,y+4);}
       ctx.fillStyle="#e8ede9";ctx.font="bold 14px system-ui";ctx.fillText("مطابقة المهارات",pad.l,30);
       for(let i=0;i<n;i++){const d=data[i];const x0=pad.l+i*gW+gW/2;const uH=cH*(d.user/5);const rH=cH*(d.req/5);
-        ctx.fillStyle="rgba(59,130,246,0.12)";ctx.beginPath();roundRect(ctx,x0-bW-4,pad.t+cH-rH,bW,rH,4);ctx.fill();
-        const grad=ctx.createLinearGradient(0,pad.t+cH-uH,0,pad.t+cH);grad.addColorStop(0,"#3B82F6");grad.addColorStop(1,"#1D4ED8");ctx.fillStyle=grad;ctx.beginPath();roundRect(ctx,x0+4,pad.t+cH-uH,bW,uH,4);ctx.fill();
+        ctx.fillStyle="rgba(217,119,6,0.12)";ctx.beginPath();roundRect(ctx,x0-bW-4,pad.t+cH-rH,bW,rH,4);ctx.fill();
+        const grad=ctx.createLinearGradient(0,pad.t+cH-uH,0,pad.t+cH);grad.addColorStop(0,"#D97706");grad.addColorStop(1,"#92400E");ctx.fillStyle=grad;ctx.beginPath();roundRect(ctx,x0+4,pad.t+cH-uH,bW,uH,4);ctx.fill();
         ctx.fillStyle="#a3b0a8";ctx.font="11px system-ui";const lbl=d.label.length>10?d.label.slice(0,10)+"…":d.label;ctx.save();ctx.translate(x0,H-pad.b+16);ctx.rotate(-0.4);ctx.fillText(lbl,-20,0);ctx.restore();}
-      ctx.fillStyle="#3B82F6";roundRect(ctx,W-160,14,12,12,3);ctx.fill();ctx.fillStyle="#a3b0a8";ctx.font="11px system-ui";ctx.fillText("مستواك",W-142,24);
-      ctx.fillStyle="rgba(59,130,246,0.15)";roundRect(ctx,W-90,14,12,12,3);ctx.fill();ctx.fillStyle="#a3b0a8";ctx.fillText("المطلوب",W-72,24);
+      ctx.fillStyle="#D97706";roundRect(ctx,W-160,14,12,12,3);ctx.fill();ctx.fillStyle="#a3b0a8";ctx.font="11px system-ui";ctx.fillText("مستواك",W-142,24);
+      ctx.fillStyle="rgba(217,119,6,0.15)";roundRect(ctx,W-90,14,12,12,3);ctx.fill();ctx.fillStyle="#a3b0a8";ctx.fillText("المطلوب",W-72,24);
     }
 
     function drawRadarChart(canvas,data){
@@ -727,8 +826,8 @@
       for(let r=1;r<=5;r++){const rr=(R*r)/5;ctx.strokeStyle="#2a3530";ctx.lineWidth=1;ctx.beginPath();for(let i=0;i<n;i++){const a=(Math.PI*2*i)/n-Math.PI/2;const x=cx+Math.cos(a)*rr;const y=cy+Math.sin(a)*rr;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.closePath();ctx.stroke();}
       for(let i=0;i<n;i++){const a=(Math.PI*2*i)/n-Math.PI/2;ctx.strokeStyle="#2a3530";ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(a)*R,cy+Math.sin(a)*R);ctx.stroke();const lx=cx+Math.cos(a)*(R+16);const ly=cy+Math.sin(a)*(R+16);ctx.fillStyle="#a3b0a8";ctx.font="10px system-ui";const lbl=data[i].label.length>10?data[i].label.slice(0,10)+"…":data[i].label;ctx.fillText(lbl,lx-20,ly+4);}
       function poly(vals,fill,stroke){ctx.beginPath();for(let i=0;i<n;i++){const a=(Math.PI*2*i)/n-Math.PI/2;const rr=R*(vals[i]/5);const x=cx+Math.cos(a)*rr;const y=cy+Math.sin(a)*rr;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.closePath();ctx.fillStyle=fill;ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.fill();ctx.stroke();}
-      poly(data.map(d=>d.req),"rgba(59,130,246,0.06)","#344038");
-      poly(data.map(d=>d.user),"rgba(59,130,246,0.18)","#3B82F6");
+      poly(data.map(d=>d.req),"rgba(217,119,6,0.06)","#344038");
+      poly(data.map(d=>d.user),"rgba(217,119,6,0.18)","#D97706");
     }
 
     // ═══════════════════════════════════
@@ -898,7 +997,7 @@
       function bx(x,y,w,h,f,r){c.fillStyle=f;c.beginPath();if(r){c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);c.lineTo(x+r,y+h);c.quadraticCurveTo(x,y+h,x,y+h-r);c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);}else{c.rect(x,y,w,h);}c.closePath();c.fill();}
       function ln(x1,y1,x2,y2,co,lw){c.strokeStyle=co||"#E5E7EB";c.lineWidth=lw||1.5;c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();}
       function circle(x,y,r,fill){c.beginPath();c.arc(x,y,r,0,Math.PI*2);c.fillStyle=fill;c.fill();}
-      function sectionTitle(title){need(60);bx(mg,Y,4,28,"#1E3A8A",0);txt(title,rE,Y+2,20,"#1E3A8A","900");ln(mg,Y+34,rE,Y+34,"#CBD5E1",1.5);Y+=48;}
+      function sectionTitle(title){need(60);bx(mg,Y,4,28,"#92400E",0);txt(title,rE,Y+2,20,"#92400E","900");ln(mg,Y+34,rE,Y+34,"#CBD5E1",1.5);Y+=48;}
 
       // ═══════════════════════════════
       // PAGE 1
@@ -906,8 +1005,8 @@
       newPage(); Y=0;
 
       // ─── HEADER (Dark Navy) ───
-      bx(0,0,W,160,"#0F172A",0);
-      bx(0,155,W,5,"#3B82F6",0);
+      bx(0,0,W,160,"#1C1917",0);
+      bx(0,155,W,5,"#D97706",0);
       txt("سِراج  SIRAJ",rE-30,35,48,"#fff","900");
       txt("التقرير الاستشاري للجاهزية المهنية",rE-30,95,22,"#F59E0B","700");
       txtL("REF: "+rep.id.slice(0,20).toUpperCase()+"  |  "+new Date().toLocaleDateString("ar-SA"),mg+20,125,13,"#64748B","400");
@@ -925,8 +1024,8 @@
 
       // ─── الملخص التنفيذي ───
       sectionTitle("الملخص التنفيذي");
-      bx(mg,Y,cW,160,"#F0F7FF",14);
-      c.strokeStyle="#BFDBFE";c.lineWidth=1.5;c.stroke();
+      bx(mg,Y,cW,160,"#FFFBEB",14);
+      c.strokeStyle="#FDE68A";c.lineWidth=1.5;c.stroke();
 
       // Score circle
       const scoreCol=rep.result.score>=70?"#10B981":rep.result.score>=40?"#F59E0B":"#EF4444";
@@ -947,7 +1046,7 @@
       txt("عدد الفجوات: "+missing.length+"  |  عدد المهارات: "+(rep.profile.skills||[]).length,infoX,Y+68,14,"#475569","400");
 
       // Breakdown chips
-      const chips=[{l:"المهارات "+bd.base,bg:"#DBEAFE",cl:"#1D4ED8"}];
+      const chips=[{l:"المهارات "+bd.base,bg:"#FEF3C7",cl:"#92400E"}];
       if(bd.experience>0) chips.push({l:"الخبرة +"+bd.experience,bg:"#D1FAE5",cl:"#059669"});
       if(bd.certs>0) chips.push({l:"الشهادات +"+bd.certs,bg:"#FEF3C7",cl:"#D97706"});
       if(bd.tools>0) chips.push({l:"الأدوات +"+bd.tools,bg:"#EDE9FE",cl:"#7C3AED"});
@@ -994,7 +1093,7 @@
         // Table header
         const cols=[{l:"المهارة",w:200},{l:"المطلوب",w:100},{l:"مستواك",w:100},{l:"الفجوة",w:100},{l:"المورد التعليمي",w:cW-500}];
         let colX=rE;
-        bx(mg,Y,cW,32,"#1E3A8A",0);
+        bx(mg,Y,cW,32,"#92400E",0);
         for(const col of cols){
           txt(col.l,colX-8,Y+6,13,"#fff","800");
           colX-=col.w;
@@ -1011,7 +1110,7 @@
           const gap=Math.max(0,m.reqLevel-m.userLevel);
           const rs=RESOURCES[m.skill]||RESOURCES.default;
           const vals=[m.label, m.reqLevel+"/5", m.userLevel+"/5", String(gap), rs[0]?.name||"منصة سطر"];
-          const colors=["#1E293B","#475569","#475569",gap>0?"#DC2626":"#059669","#3B82F6"];
+          const colors=["#1E293B","#475569","#475569",gap>0?"#DC2626":"#059669","#D97706"];
           const weights=["700","400","400","800","400"];
           for(let j=0;j<cols.length;j++){
             txt(vals[j],colX-8,Y+6,13,colors[j],weights[j]);
@@ -1027,7 +1126,7 @@
         sectionTitle("خارطة الطريق المخصصة ("+prefsName+")");
         // Table header
         const rcols=[{l:"",w:110},{l:"المرحلة",w:120},{l:"التركيز",w:250},{l:"المورد",w:cW-480}];
-        bx(mg,Y,cW,32,"#1E3A8A",0);
+        bx(mg,Y,cW,32,"#92400E",0);
         let rx=rE;
         // Column headers right to left
         txt("الأسبوع",rE-8,Y+6,13,"#fff","800");
@@ -1042,7 +1141,7 @@
           bx(mg,Y,cW,30,bg,0);
           ln(mg,Y+30,rE,Y+30,"#E2E8F0",1);
           txt("الأسبوع "+w.week,rE-8,Y+6,13,"#1E293B","700");
-          txt(w.phase,rE-118,Y+6,13,"#3B82F6","700");
+          txt(w.phase,rE-118,Y+6,13,"#D97706","700");
           txt(w.focus.join(" + "),rE-238,Y+6,13,"#475569","400");
           const sk=missing.find(m2=>m2.label===w.focus[0]);
           const rs=sk?RESOURCES[sk.skill]||RESOURCES.default:RESOURCES.default;
@@ -1069,7 +1168,7 @@
 
       // ─── Closing Message ───
       need(120);Y+=10;
-      bx(mg,Y,cW,90,"#0F172A",14);
+      bx(mg,Y,cW,90,"#1C1917",14);
       txtC("سِراج — رسالة تحفيزية",W/2,Y+14,18,"#F59E0B","900");
       const msg=rep.result.score>=70?"أنت في وضع ممتاز! ركّز على البورتفوليو وابدأ التقديم بثقة.":rep.result.score>=40?"عندك أساس جيد! اتبع خارطة الطريق وركّز على أعلى الفجوات أثراً.":"كل خبير بدأ من الصفر. ابدأ بالمهارة الأولى واستمر — الرحلة تستاهل.";
       txtC(msg,W/2,Y+42,14,"#CBD5E1","400");
